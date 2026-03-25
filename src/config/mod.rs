@@ -3,19 +3,36 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::recorder::{AudioSource, CaptureRegion, OutputFormat};
+use crate::recorder::{AudioConfig, CaptureRegion, OutputFormat};
+use crate::theme::ThemeAccent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub output_dir: PathBuf,
     pub format: OutputFormat,
-    pub audio: AudioSource,
+    #[serde(default)]
+    pub audio: AudioConfig,
     pub region: CaptureRegion,
+    #[serde(default)]
+    pub output: Option<String>,
+    #[serde(default = "default_framerate")]
+    pub framerate: u32,
+    #[serde(default)]
+    pub accent: ThemeAccent,
+    #[serde(default = "default_glow")]
+    pub glow: bool,
+}
+
+fn default_glow() -> bool {
+    false
+}
+
+fn default_framerate() -> u32 {
+    30
 }
 
 impl Default for Config {
     fn default() -> Self {
-        // Try to use ~/Videos/Screencasts as default, fallback to temp
         let default_dir = dirs::home_dir()
             .map(|h| h.join("Videos/Screencasts"))
             .unwrap_or_else(std::env::temp_dir);
@@ -23,8 +40,12 @@ impl Default for Config {
         Self {
             output_dir: default_dir,
             format: OutputFormat::Mp4,
-            audio: AudioSource::None,
+            audio: AudioConfig::none(),
             region: CaptureRegion::FullScreen,
+            output: None,
+            framerate: 30,
+            accent: ThemeAccent::default(),
+            glow: false,
         }
     }
 }
@@ -35,9 +56,7 @@ impl Config {
             .ok_or_else(|| anyhow::anyhow!("Could not find config directory"))?
             .join("wf-recorder-gui");
 
-        if !config_dir.exists() {
-            fs::create_dir_all(&config_dir)?;
-        }
+        fs::create_dir_all(&config_dir)?;
 
         Ok(config_dir)
     }

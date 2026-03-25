@@ -1,52 +1,62 @@
 # WF Recorder GUI
 
-[![CI](https://github.com/ali205412/wf-recorder-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/ali205412/wf-recorder-gui/actions/workflows/ci.yml)
-[![Release](https://github.com/ali205412/wf-recorder-gui/actions/workflows/release.yml/badge.svg)](https://github.com/ali205412/wf-recorder-gui/actions/workflows/release.yml)
+[![CI](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/ci.yml)
+[![Release](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/release.yml/badge.svg)](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/release.yml)
 [![AUR version](https://img.shields.io/aur/version/wf-recorder-gui)](https://aur.archlinux.org/packages/wf-recorder-gui/)
 
-A modern, minimal, and sleek GUI for wf-recorder, the Wayland screen recorder. Built with iced and Rust, featuring a lightweight native interface with persistent settings.
+Fork of [ali205412/wf-recorder-gui](https://github.com/ali205412/wf-recorder-gui).
+
+A modern, minimal GUI for [wf-recorder](https://github.com/ammen99/wf-recorder), the Wayland screen recorder. Built with Rust and [iced](https://github.com/iced-rs/iced), featuring a glass-morphism dark theme, responsive layout, and a non-intrusive compact overlay during recording.
 
 ## Features
 
-- Lightweight iced-based native interface
-- Clean, minimal design
-- Full screen and region capture
-- Multiple audio source options:
-  - System audio
-  - Microphone
-  - No audio
-- Multiple output formats:
-  - WebM
-  - MP4
-  - MKV
-- Custom save location with persistent settings
-- Hardware acceleration support
-- Wayland native
+- **Display picker** — select which monitor to record (with position labels on multi-monitor setups)
+- **Capture modes** — full screen or interactive region selection via `slurp`
+- **Framerate** — 24 / 30 / 60 FPS
+- **Audio** — system audio, microphone, both, or none
+- **Output formats** — WebM, MP4, MKV
+- **Persistent settings** — all options saved automatically
+- **Error reporting** — wf-recorder errors surfaced in a floating popup; invalid region selection (overlapping displays) detected before recording starts
+
+## Requirements
+
+Runtime dependencies:
+
+| Tool | Purpose |
+|------|---------|
+| `wf-recorder` | Core screen recording |
+| `wlr-randr` | Display geometry and position detection |
+| `slurp` | Interactive region selection (Region mode only) |
+| `pactl` | Audio source detection |
 
 ## Installation
 
-### Arch Linux (Recommended)
+### Arch Linux (AUR)
 
-Install from AUR:
+> **Note:** The AUR package is not yet available.
+
 ```bash
 yay -S wf-recorder-gui
-```
-or
-```bash
+# or
 paru -S wf-recorder-gui
 ```
 
-### Other Distributions
+### Pre-built binary (all distros)
 
-Build from source:
+Download the latest `wf-recorder-gui-x.x.x-x86_64-linux.tar.gz` from the [Releases](https://github.com/nabiko02/wf-recorder-gui/releases) page, extract and place the binary in your `PATH`:
 
-1. Install dependencies (package names may vary):
-   - wf-recorder
-   - Rust toolchain
-
-2. Build and install:
 ```bash
-git clone https://github.com/ali205412/wf-recorder-gui.git
+tar -xzf wf-recorder-gui-*.tar.gz
+sudo install -Dm755 wf-recorder-gui /usr/local/bin/wf-recorder-gui
+```
+
+### Build from source
+
+```bash
+# Install build dependencies (Arch)
+sudo pacman -S rust libxkbcommon wayland
+
+git clone https://github.com/nabiko02/wf-recorder-gui.git
 cd wf-recorder-gui
 cargo build --release
 sudo install -Dm755 target/release/wf-recorder-gui /usr/bin/wf-recorder-gui
@@ -56,77 +66,54 @@ sudo install -Dm644 wf-recorder-gui.desktop /usr/share/applications/wf-recorder-
 ## Usage
 
 1. Launch the application
-2. Choose your recording options:
-   - Select output format (WebM/MP4/MKV)
-   - Choose capture mode (Full Screen/Region)
-   - Select audio source (System/Microphone/None)
-   - Set save location
-3. Click Record to start
-4. Click Stop when finished
+2. Configure your recording:
+   - **Capture mode** — Screen (pick a display) or Region (draw with `slurp`)
+   - **Framerate** — 24 / 30 / 60 FPS
+   - **Audio source** — System, Micro, both, or neither
+   - **Output format** — WebM / MP4 / MKV
+   - **Save location** — browse or type a path
+3. Click **Start Recording** — a 3-second countdown appears, then the compact overlay
+4. Click **Stop** in the overlay when finished
 
 ## Development
 
-### Requirements
-
-- Arch Linux (recommended for development)
-- Dependencies:
-```bash
-sudo pacman -S wf-recorder base-devel rust
-```
-
-### Project Structure
+### Project structure
 
 ```
 src/
-├── audio/       # Audio handling
-├── config/      # Configuration management with persistence
-├── recorder/    # Recording functionality
-└── main.rs     # Application entry point with iced UI
+├── audio/           # Audio source detection
+├── config/          # Persistent JSON config (~/.config/wf-recorder-gui/config.json)
+├── recorder/        # wf-recorder subprocess, argument building, geometry validation
+├── theme.rs         # Glass-morphism design system, responsive scaling
+└── main.rs          # App state machine, iced update/view
 ```
 
-### CI/CD Workflows
+### Commands
 
-The project uses GitHub Actions for:
-- Continuous Integration (CI)
-  - Building and testing on Arch Linux
-  - Code formatting checks
-  - Clippy linting
-  - Security audits
-- Release automation
-  - Building Arch packages
-  - Creating GitHub releases
-- Automated AUR updates
-  - Publishing and updating the AUR package
+```bash
+cargo build                          # debug build
+cargo build --release                # release build (stripped)
+cargo run                            # run
+cargo test --verbose                 # tests
+cargo fmt --all -- --check           # format check
+cargo clippy -- -D warnings          # lint
+cargo audit                          # security audit
+```
 
-### Contributing
+### CI/CD
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-Please make sure to:
-- Follow the existing code style
-- Add tests if applicable
-- Update documentation as needed
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `ci.yml` | push / PR to `main` | build, test, fmt, clippy, audit |
+| `release.yml` | push `v*` tag | build binary + Arch `.pkg.tar.zst`, create GitHub release |
+| `publish-aur.yml` | push `v*` tag | update AUR package |
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT — see [LICENSE](LICENSE).
 
 ## Acknowledgments
 
-- [wf-recorder](https://github.com/ammen99/wf-recorder) - The underlying screen recording utility
-- [GTK](https://gtk.org/) - The GUI toolkit
-- All contributors and users of this project
-
-## Support
-
-If you encounter any issues or have suggestions:
-1. Check the [Issues](https://github.com/ali205412/wf-recorder-gui/issues) page
-2. Open a new issue if needed
-3. Provide as much detail as possible:
-   - System information
-   - Steps to reproduce
-   - Expected vs actual behavior
+- [wf-recorder](https://github.com/ammen99/wf-recorder) — the underlying recording engine
+- [iced](https://github.com/iced-rs/iced) — Rust GUI framework
+- [slurp](https://github.com/emersion/slurp) — Wayland region selection

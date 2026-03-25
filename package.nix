@@ -32,6 +32,7 @@ rustPlatform.buildRustPackage rec {
     pkg-config
     wayland-scanner
     scdoc
+    wrapGAppsHook4
   ];
 
   buildInputs = [
@@ -47,7 +48,6 @@ rustPlatform.buildRustPackage rec {
     pango
     cairo
     gtk4
-    wrapGAppsHook4
   ];
 
   desktopEntry = [
@@ -73,9 +73,9 @@ rustPlatform.buildRustPackage rec {
   '';
 
   meta = with lib; {
-    description = "wf-recorder GUI (GTK)";
-    homepage = "https://github.com/ali205412/wf-recorder-gui";
+    description = "Modern GUI for wf-recorder, the Wayland screen recorder";
+    homepage = "https://github.com/nabiko02/wf-recorder-gui";
     license = licenses.mit;
-    maintainers = with maintainers; [ myamusashi ];
+    maintainers = [ ];
   };
 }

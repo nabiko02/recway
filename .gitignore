@@ -30,3 +30,5 @@ debian/
 # Test coverage
 coverage/
 *.profraw
+CLAUDE.md
+CLAUDE.md

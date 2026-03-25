@@ -1,12 +1,12 @@
-# Maintainer: yuik <ali205412@github.com>
+# Maintainer: Nabiko02
 pkgname=wf-recorder-gui
-pkgver=0.4.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Modern GUI for wf-recorder screen recorder"
 arch=('x86_64')
-url="https://github.com/ali205412/wf-recorder-gui"
+url="https://github.com/nabiko02/wf-recorder-gui"
 license=('MIT')
-depends=('wf-recorder')
+depends=('wf-recorder' 'wlr-randr')
 makedepends=('rust' 'cargo')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
 sha256sums=('SKIP')

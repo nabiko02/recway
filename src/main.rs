@@ -4,47 +4,74 @@ mod recorder;
 mod theme;
 
 use anyhow::Result;
-use iced::widget::{button, column, container, pick_list, row, text, Space};
+use iced::widget::{Column, Space, button, column, container, pick_list, row, text};
 use iced::{
-    alignment, executor, window, Application, Command, Element, Font, Length, Point, Settings,
-    Size, Theme as IcedTheme,
+    Application, Command, Element, Font, Length, Point, Settings, Size, Theme as IcedTheme,
+    alignment, executor, window,
 };
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use config::Config;
-use recorder::{AudioSource, CaptureRegion, OutputFormat, Recorder, RecordingConfig};
-use theme::{design, Theme};
+use recorder::{
+    CaptureRegion, OutputFormat, OutputInfo, Recorder, RecordingConfig, list_outputs,
+    validate_geometry,
+};
+use theme::{Theme, ThemeAccent, design};
+
+// Static slice avoids a heap allocation on every settings view render
+static OUTPUT_FORMATS: &[OutputFormat] =
+    &[OutputFormat::WebM, OutputFormat::Mp4, OutputFormat::Mkv];
+
+fn settings_window_height(scale: f32, has_display: bool) -> f32 {
+    let lh = 1.4_f32;
+    let win_pad = 2.0 * design::BASE_WINDOW_PADDING as f32;
+    let sp = design::BASE_SECTION_SPACING as f32;
+    let title_h = design::BASE_TITLE_SIZE as f32 * lh
+        + design::BASE_TINY_SPACE
+        + design::BASE_SUBTITLE_SIZE as f32 * lh
+        + design::BASE_SECTION_SPACING as f32;
+    let label_h = design::BASE_LABEL_SIZE as f32 * lh;
+    let small_sp = design::BASE_SMALL_SPACE;
+    let btn_h = design::BASE_BUTTON_HEIGHT as f32;
+    let list_h =
+        design::BASE_INPUT_TEXT_SIZE as f32 * lh + 2.0 * design::BASE_CONTAINER_PADDING as f32;
+    let btn_sec = label_h + small_sp + btn_h;
+    let list_sec = label_h + small_sp + list_h;
+    let left_h = if has_display {
+        btn_sec + sp + list_sec + sp + btn_sec
+    } else {
+        btn_sec + sp + btn_sec
+    };
+    let right_h = btn_sec + sp + list_sec + sp + list_sec;
+    let record_h =
+        2.0 * design::BASE_BUTTON_PADDING_V as f32 + design::BASE_INPUT_TEXT_SIZE as f32 * lh;
+    (win_pad + title_h + sp + left_h.max(right_h) + sp + record_h + 16.0) * scale
+}
 
 fn main() -> Result<()> {
-    // Detect screen size early to set proper initial window size
     let screen_size = App::detect_screen_size();
     let scale_factor = design::scale_factor(screen_size.width, screen_size.height);
 
-    // Calculate optimal initial size
+    let config = Config::load().unwrap_or_default();
+    let outputs = list_outputs();
+    let has_display = matches!(config.region, CaptureRegion::FullScreen) && !outputs.is_empty();
+
     let initial_size = Size::new(
         (design::BASE_WINDOW_WIDTH * scale_factor)
             .clamp(design::MIN_WINDOW_WIDTH, design::MAX_WINDOW_WIDTH),
-        (design::BASE_WINDOW_HEIGHT * scale_factor)
-            .clamp(design::MIN_WINDOW_HEIGHT, design::MAX_WINDOW_HEIGHT),
+        settings_window_height(scale_factor, has_display),
     );
 
     App::run(Settings {
         window: iced::window::Settings {
             size: initial_size,
-            resizable: true,
+            resizable: false,
             decorations: true,
             transparent: false,
-            min_size: Some(iced::Size::new(
-                design::MIN_WINDOW_WIDTH,
-                design::MIN_WINDOW_HEIGHT,
-            )),
-            max_size: Some(iced::Size::new(
-                design::MAX_WINDOW_WIDTH,
-                design::MAX_WINDOW_HEIGHT,
-            )),
             ..Default::default()
         },
+        flags: (config, outputs),
         antialiasing: true,
         default_font: Font::default(),
         ..Default::default()
@@ -56,18 +83,20 @@ fn main() -> Result<()> {
 enum Message {
     FormatSelected(OutputFormat),
     ToggleRegion(bool),
-    ToggleAudio(AudioSource),
+    ToggleSystemAudio(bool),
+    ToggleMicAudio(bool),
+    OutputSelected(OutputInfo),
+    FramerateSelected(u32),
+    AccentSelected(ThemeAccent),
+    ToggleGlow,
     BrowseFolder,
     FolderSelected(PathBuf),
     StartRecording,
+    RegionSelected(Option<String>),
     StopRecording,
+    DismissError,
     Tick,
-    #[allow(dead_code)]
-    ResizeWindow(Size),
-    #[allow(dead_code)]
-    PositionWindow(Point),
-    #[allow(dead_code)]
-    MinimizeWindow,
+    NoOp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,6 +104,7 @@ enum AppState {
     Settings,
     CompactCountdown(u8),
     CompactRecording,
+    CompactError,
 }
 
 struct App {
@@ -86,37 +116,45 @@ struct App {
     theme: Theme,
     screen_size: Size,
     scale_factor: f32,
+    available_outputs: Vec<OutputInfo>,
+    pending_geometry: Option<String>,
+    last_error: Option<String>,
 }
 
 impl Application for App {
     type Executor = executor::Default;
     type Message = Message;
     type Theme = IcedTheme;
-    type Flags = ();
+    type Flags = (Config, Vec<OutputInfo>);
 
-    fn new(_flags: ()) -> (Self, Command<Message>) {
-        let config = Config::load().unwrap_or_default();
-
-        // Try to get actual screen size, fallback to safe default
+    fn new((mut config, available_outputs): Self::Flags) -> (Self, Command<Message>) {
         let screen_size = Self::detect_screen_size();
         let scale_factor = design::scale_factor(screen_size.width, screen_size.height);
 
+        // Always pre-select first display when none is configured
+        if config.output.is_none()
+            && let Some(first) = available_outputs.first()
+        {
+            config.output = Some(first.name.clone());
+            let _ = config.save();
+        }
+
+        let theme = Theme::with_accent(config.accent, config.glow);
         let app = App {
             state: AppState::Settings,
             config,
             recorder: None,
             recording_start: None,
             recording_duration: Duration::default(),
-            theme: Theme::default(),
+            theme,
             screen_size,
             scale_factor,
+            available_outputs,
+            pending_geometry: None,
+            last_error: None,
         };
 
-        // Ensure window is properly sized on startup
-        let optimal_size = app.get_settings_size();
-        let initial_command = window::resize(window::Id::MAIN, optimal_size);
-
-        (app, initial_command)
+        (app, Command::none())
     }
 
     fn title(&self) -> String {
@@ -141,10 +179,37 @@ impl Application for App {
                     CaptureRegion::Selection
                 };
                 let _ = self.config.save();
+                window::resize(window::Id::MAIN, self.get_settings_size())
+            }
+            Message::ToggleSystemAudio(on) => {
+                self.config.audio.system = on;
+                let _ = self.config.save();
                 Command::none()
             }
-            Message::ToggleAudio(source) => {
-                self.config.audio = source;
+            Message::ToggleMicAudio(on) => {
+                self.config.audio.microphone = on;
+                let _ = self.config.save();
+                Command::none()
+            }
+            Message::OutputSelected(info) => {
+                self.config.output = Some(info.name);
+                let _ = self.config.save();
+                Command::none()
+            }
+            Message::FramerateSelected(fps) => {
+                self.config.framerate = fps;
+                let _ = self.config.save();
+                Command::none()
+            }
+            Message::AccentSelected(accent) => {
+                self.config.accent = accent;
+                self.theme = Theme::with_accent(accent, self.config.glow);
+                let _ = self.config.save();
+                Command::none()
+            }
+            Message::ToggleGlow => {
+                self.config.glow = !self.config.glow;
+                self.theme = Theme::with_accent(self.config.accent, self.config.glow);
                 let _ = self.config.save();
                 Command::none()
             }
@@ -162,7 +227,7 @@ impl Application for App {
                         if let Some(p) = path {
                             Message::FolderSelected(p)
                         } else {
-                            Message::Tick // No-op
+                            Message::NoOp
                         }
                     },
                 )
@@ -173,37 +238,82 @@ impl Application for App {
                 Command::none()
             }
             Message::StartRecording => {
-                let recording_config = RecordingConfig {
-                    format: self.config.format,
-                    audio: self.config.audio,
-                    region: self.config.region,
-                    output_dir: self.config.output_dir.clone(),
-                };
-
-                let _recorder = Recorder::new(recording_config.clone());
-
-                // Always use compact mode for recording - non-intrusive
-                self.state = AppState::CompactCountdown(3);
-
-                // Handle region selection vs fullscreen
-                let delay = match recording_config.region {
-                    CaptureRegion::Selection => 100,
-                    CaptureRegion::FullScreen => 1000,
-                };
-
-                // Always switch to compact mode for recording
-                let compact_size = self.get_compact_size();
-                let position = self.get_compact_position();
-
-                Command::batch([
-                    window::resize(window::Id::MAIN, compact_size),
-                    window::move_to(window::Id::MAIN, position),
+                self.last_error = None;
+                if matches!(self.config.region, CaptureRegion::Selection) {
+                    // Run slurp first, before showing countdown
                     Command::perform(
-                        async move {
-                            tokio::time::sleep(Duration::from_millis(delay)).await;
+                        async {
+                            let result = tokio::task::spawn_blocking(|| {
+                                std::process::Command::new("slurp")
+                                    .output()
+                                    .ok()
+                                    .and_then(|o| {
+                                        let geo =
+                                            String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                        if geo.is_empty() { None } else { Some(geo) }
+                                    })
+                            })
+                            .await;
+                            result.ok().flatten()
                         },
-                        |_| Message::Tick,
-                    ),
+                        Message::RegionSelected,
+                    )
+                } else {
+                    self.state = AppState::CompactCountdown(3);
+                    let compact_size = self.get_compact_size();
+                    let position = self.get_compact_position();
+                    Command::batch([
+                        window::resize(window::Id::MAIN, compact_size),
+                        window::move_to(window::Id::MAIN, position),
+                        Command::perform(
+                            async {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            },
+                            |_| Message::Tick,
+                        ),
+                    ])
+                }
+            }
+            Message::RegionSelected(geo) => {
+                match geo {
+                    None => Command::none(), // user cancelled slurp, stay on settings
+                    Some(geometry) => {
+                        // Pre-validate before countdown: detect multi-display overlap immediately
+                        if let Some(err) = validate_geometry(&geometry, &self.available_outputs) {
+                            self.last_error = Some(err);
+                            self.state = AppState::CompactError;
+                            let error_size = self.get_error_size();
+                            let pos = self.get_compact_position_for(error_size);
+                            return Command::batch([
+                                window::resize(window::Id::MAIN, error_size),
+                                window::move_to(window::Id::MAIN, pos),
+                            ]);
+                        }
+                        self.pending_geometry = Some(geometry);
+                        self.state = AppState::CompactCountdown(3);
+                        let compact_size = self.get_compact_size();
+                        let position = self.get_compact_position();
+                        Command::batch([
+                            window::resize(window::Id::MAIN, compact_size),
+                            window::move_to(window::Id::MAIN, position),
+                            Command::perform(
+                                async {
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                },
+                                |_| Message::Tick,
+                            ),
+                        ])
+                    }
+                }
+            }
+            Message::DismissError => {
+                self.last_error = None;
+                self.state = AppState::Settings;
+                let settings_size = self.get_settings_size();
+                let center = self.get_center_position(settings_size);
+                Command::batch([
+                    window::resize(window::Id::MAIN, settings_size),
+                    window::move_to(window::Id::MAIN, center),
                 ])
             }
             Message::StopRecording => {
@@ -215,14 +325,9 @@ impl Application for App {
                 self.recording_start = None;
                 self.recording_duration = Duration::default();
 
-                // Return to normal settings window size and center
                 let settings_size = self.get_settings_size();
                 let center_position = self.get_center_position(settings_size);
-
-                Command::batch([
-                    window::resize(window::Id::MAIN, settings_size),
-                    window::move_to(window::Id::MAIN, center_position),
-                ])
+                window::move_to(window::Id::MAIN, center_position)
             }
             Message::Tick => {
                 match self.state {
@@ -237,11 +342,25 @@ impl Application for App {
                             )
                         } else {
                             // Start recording
+                            let output_geometry =
+                                if matches!(self.config.region, CaptureRegion::FullScreen) {
+                                    self.config.output.as_ref().and_then(|name| {
+                                        self.available_outputs
+                                            .iter()
+                                            .find(|o| &o.name == name)
+                                            .and_then(|o| o.geometry.clone())
+                                    })
+                                } else {
+                                    None
+                                };
                             let recording_config = RecordingConfig {
                                 format: self.config.format,
                                 audio: self.config.audio,
                                 region: self.config.region,
+                                output: self.config.output.clone(),
+                                framerate: self.config.framerate,
                                 output_dir: self.config.output_dir.clone(),
+                                geometry: self.pending_geometry.take().or(output_geometry),
                             };
 
                             let mut recorder = Recorder::new(recording_config);
@@ -250,10 +369,7 @@ impl Application for App {
                                 self.state = AppState::Settings;
                                 let settings_size = self.get_settings_size();
                                 let center_position = self.get_center_position(settings_size);
-                                Command::batch([
-                                    window::resize(window::Id::MAIN, settings_size),
-                                    window::move_to(window::Id::MAIN, center_position),
-                                ])
+                                window::move_to(window::Id::MAIN, center_position)
                             } else {
                                 self.recorder = Some(recorder);
                                 // Always use compact recording mode - non-intrusive
@@ -274,6 +390,22 @@ impl Application for App {
                         if let Some(start) = self.recording_start {
                             self.recording_duration = start.elapsed();
                         }
+                        // Detect if wf-recorder exited unexpectedly (e.g. geometry error)
+                        if let Some(recorder) = &mut self.recorder
+                            && let Some(error) = recorder.check_running()
+                        {
+                            self.recorder = None;
+                            self.state = AppState::CompactError;
+                            self.recording_start = None;
+                            self.recording_duration = Duration::default();
+                            self.last_error = Some(error);
+                            let error_size = self.get_error_size();
+                            let pos = self.get_compact_position_for(error_size);
+                            return Command::batch([
+                                window::resize(window::Id::MAIN, error_size),
+                                window::move_to(window::Id::MAIN, pos),
+                            ]);
+                        }
                         Command::perform(
                             async {
                                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -281,12 +413,10 @@ impl Application for App {
                             |_| Message::Tick,
                         )
                     }
-                    AppState::Settings => Command::none(),
+                    AppState::Settings | AppState::CompactError => Command::none(),
                 }
             }
-            Message::ResizeWindow(size) => window::resize(window::Id::MAIN, size),
-            Message::PositionWindow(position) => window::move_to(window::Id::MAIN, position),
-            Message::MinimizeWindow => window::minimize(window::Id::MAIN, true),
+            Message::NoOp => Command::none(),
         }
     }
 
@@ -295,11 +425,12 @@ impl Application for App {
             AppState::Settings => self.view_settings(),
             AppState::CompactCountdown(count) => self.view_compact_countdown(count),
             AppState::CompactRecording => self.view_compact_recording(),
+            AppState::CompactError => self.view_compact_error(),
         };
 
         // Dynamic window padding based on scale factor and mode
         let padding = match self.state {
-            AppState::CompactCountdown(_) | AppState::CompactRecording => {
+            AppState::CompactCountdown(_) | AppState::CompactRecording | AppState::CompactError => {
                 design::COMPACT_BUTTON_PADDING
             }
             _ => design::window_padding(self.scale_factor),
@@ -330,27 +461,20 @@ impl App {
             return Size::new(width, height);
         }
 
-        // Method 2: Try xrandr on Linux (common case)
-        if let Ok(output) = std::process::Command::new("xrandr")
-            .arg("--current")
-            .output()
+        // Method 2: Try wlr-randr on Wayland (wlroots compositors)
+        if let Ok(output) = std::process::Command::new("wlr-randr").output()
+            && let Ok(output_str) = String::from_utf8(output.stdout)
         {
-            if let Ok(output_str) = String::from_utf8(output.stdout) {
-                // Parse xrandr output for primary display
-                for line in output_str.lines() {
-                    if line.contains("primary") || line.contains("*") {
-                        if let Some(resolution) = line.split_whitespace().find(|s| {
-                            s.contains("x") && s.chars().next().unwrap_or(' ').is_ascii_digit()
-                        }) {
-                            let parts: Vec<&str> = resolution.split('x').collect();
-                            if parts.len() == 2 {
-                                if let (Ok(w), Ok(h)) =
-                                    (parts[0].parse::<f32>(), parts[1].parse::<f32>())
-                                {
-                                    return Size::new(w, h);
-                                }
-                            }
-                        }
+            // Lines with current mode look like: "  1920x1080 px, 60.000 Hz (current)"
+            for line in output_str.lines() {
+                if line.contains("current")
+                    && let Some(resolution) = line.split_whitespace().next()
+                {
+                    let parts: Vec<&str> = resolution.split('x').collect();
+                    if parts.len() == 2
+                        && let (Ok(w), Ok(h)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>())
+                    {
+                        return Size::new(w, h);
                     }
                 }
             }
@@ -365,27 +489,90 @@ impl App {
     fn view_settings(&self) -> Element<'_, Message> {
         let colors = self.theme.colors;
 
-        // Dynamic sizes based on scale factor
         let title_size = design::title_size(self.scale_factor);
         let subtitle_size = design::subtitle_size(self.scale_factor);
         let section_spacing = design::section_spacing(self.scale_factor);
         let container_padding = design::container_padding(self.scale_factor);
+        let btn_gap = Length::Fixed(container_padding as f32);
 
-        // Title with subtitle - responsive sizing
+        // Theme accent dots
+        let dot_size = 18.0_f32 * self.scale_factor;
+        let accent_dot = |accent: ThemeAccent| -> Element<Message> {
+            let active = self.theme.accent == accent;
+            button(Space::with_width(Length::Fixed(dot_size)))
+                .on_press(Message::AccentSelected(accent))
+                .width(Length::Fixed(dot_size))
+                .height(Length::Fixed(dot_size))
+                .padding(0)
+                .style(iced::theme::Button::Custom(Box::new(theme::ColorDotStyle(
+                    accent.color(),
+                    active,
+                ))))
+                .into()
+        };
+        let dot_gap = Length::Fixed(6.0 * self.scale_factor);
+        let s = self.scale_factor;
+        let dot_size = 12.0 * s;
+        let pill_w = 30.0 * s;
+        let pill_h = 18.0 * s;
+        let gap = pill_w - dot_size - 6.0 * s;
+        let dot = container(Space::new(Length::Fixed(dot_size), Length::Fixed(dot_size))).style(
+            iced::theme::Container::Custom(Box::new(theme::ToggleDotStyle)),
+        );
+        let toggle_inner = if self.config.glow {
+            row![Space::with_width(Length::Fixed(gap)), dot]
+                .align_items(alignment::Alignment::Center)
+        } else {
+            row![dot, Space::with_width(Length::Fixed(gap))]
+                .align_items(alignment::Alignment::Center)
+        };
+        let glow_btn = button(toggle_inner)
+            .on_press(Message::ToggleGlow)
+            .width(Length::Fixed(pill_w))
+            .height(Length::Fixed(pill_h))
+            .padding([3, 3])
+            .style(iced::theme::Button::Custom(Box::new(
+                theme::GlowToggleStyle(colors, self.config.glow),
+            )));
+
+        let accent_dots = row![
+            accent_dot(ThemeAccent::Blue),
+            Space::with_width(dot_gap),
+            accent_dot(ThemeAccent::Purple),
+            Space::with_width(dot_gap),
+            accent_dot(ThemeAccent::Pink),
+            Space::with_width(dot_gap),
+            accent_dot(ThemeAccent::Red),
+            Space::with_width(dot_gap),
+            accent_dot(ThemeAccent::Orange),
+            Space::with_width(dot_gap),
+            glow_btn,
+        ]
+        .align_items(alignment::Alignment::Center);
+
+        // Title
         let title_section = container(
-            column![
-                text("WF Recorder")
-                    .size(title_size)
-                    .font(Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    })
-                    .style(iced::theme::Text::Color(colors.text)),
-                text(format!("{} • 30FPS", self.config.format))
+            row![
+                column![
+                    text("WF Recorder")
+                        .size(title_size)
+                        .font(Font {
+                            weight: iced::font::Weight::Bold,
+                            ..Default::default()
+                        })
+                        .style(iced::theme::Text::Color(colors.text)),
+                    text(format!(
+                        "{} • {}FPS",
+                        self.config.format, self.config.framerate
+                    ))
                     .size(subtitle_size)
                     .style(iced::theme::Text::Color(colors.text_secondary)),
+                ]
+                .spacing(design::tiny_space(self.scale_factor) as u16)
+                .width(Length::Fill),
+                accent_dots,
             ]
-            .spacing(design::tiny_space(self.scale_factor) as u16),
+            .align_items(alignment::Alignment::Center),
         )
         .width(Length::Fill)
         .padding([0, 0, section_spacing, 0])
@@ -393,57 +580,115 @@ impl App {
             theme::ContainerStyle(colors),
         )));
 
-        // Capture mode buttons - responsive spacing
-        let capture_buttons = row![
-            self.create_option_button(
-                "🖥",
-                "Screen",
-                matches!(self.config.region, CaptureRegion::FullScreen),
-                Message::ToggleRegion(true),
-            ),
-            Space::with_width(Length::Fixed(container_padding as f32)),
-            self.create_option_button(
-                "◰",
-                "Region",
-                matches!(self.config.region, CaptureRegion::Selection),
-                Message::ToggleRegion(false),
-            ),
-        ];
+        // Capture mode
+        let capture_section = self.create_section(
+            "CAPTURE MODE",
+            row![
+                self.create_option_button(
+                    "🖥",
+                    "Screen",
+                    matches!(self.config.region, CaptureRegion::FullScreen),
+                    Message::ToggleRegion(true)
+                ),
+                Space::with_width(btn_gap),
+                self.create_option_button(
+                    "◰",
+                    "Region",
+                    matches!(self.config.region, CaptureRegion::Selection),
+                    Message::ToggleRegion(false)
+                ),
+            ],
+        );
 
-        let capture_section = self.create_section("CAPTURE MODE", capture_buttons);
+        // Display picker (left col, conditional)
+        let display_section = if matches!(self.config.region, CaptureRegion::FullScreen)
+            && !self.available_outputs.is_empty()
+        {
+            let options = self.available_outputs.clone();
+            let selected = self.config.output.as_ref().and_then(|name| {
+                self.available_outputs
+                    .iter()
+                    .find(|o| &o.name == name)
+                    .cloned()
+            });
+            Some(
+                self.create_section(
+                    "DISPLAY",
+                    container(
+                        pick_list(options, selected, Message::OutputSelected)
+                            .padding([container_padding, container_padding])
+                            .width(Length::Fill)
+                            .text_size(design::input_text_size(self.scale_factor)),
+                    )
+                    .width(Length::Fill)
+                    .style(iced::theme::Container::Custom(Box::new(theme::CardStyle(
+                        colors,
+                    )))),
+                ),
+            )
+        } else {
+            None
+        };
 
-        // Audio source buttons
-        let audio_buttons = row![
-            self.create_option_button(
-                "🔊",
-                "System",
-                matches!(self.config.audio, AudioSource::System),
-                Message::ToggleAudio(AudioSource::System),
-            ),
-            Space::with_width(Length::Fixed(container_padding as f32)),
-            self.create_option_button(
-                "🎤",
-                "Mic",
-                matches!(self.config.audio, AudioSource::Microphone),
-                Message::ToggleAudio(AudioSource::Microphone),
-            ),
-            Space::with_width(Length::Fixed(container_padding as f32)),
-            self.create_option_button(
-                "🔇",
-                "None",
-                matches!(self.config.audio, AudioSource::None),
-                Message::ToggleAudio(AudioSource::None),
-            ),
-        ];
+        // Framerate
+        let fps_btn = |fps: u32| -> Element<Message> {
+            let active = self.config.framerate == fps;
+            button(
+                container(
+                    text(format!("{fps} fps")).size(design::button_text_size(self.scale_factor)),
+                )
+                .width(Length::Fill)
+                .center_x()
+                .center_y(),
+            )
+            .on_press(Message::FramerateSelected(fps))
+            .padding([design::button_padding_v(self.scale_factor), 0])
+            .width(Length::Fill)
+            .height(Length::Fixed(
+                design::button_height(self.scale_factor) as f32
+            ))
+            .style(iced::theme::Button::Custom(Box::new(
+                theme::OptionCardStyle(self.theme.colors, active),
+            )))
+            .into()
+        };
+        let framerate_section = self.create_section(
+            "FRAMERATE",
+            row![
+                fps_btn(24),
+                Space::with_width(btn_gap),
+                fps_btn(30),
+                Space::with_width(btn_gap),
+                fps_btn(60)
+            ],
+        );
 
-        let audio_section = self.create_section("AUDIO SOURCE", audio_buttons);
+        // Audio source — independent toggle buttons
+        let audio_section = self.create_section(
+            "AUDIO SOURCE",
+            row![
+                self.create_option_button(
+                    "🔊",
+                    "System",
+                    self.config.audio.system,
+                    Message::ToggleSystemAudio(!self.config.audio.system),
+                ),
+                Space::with_width(btn_gap),
+                self.create_option_button(
+                    "🎙",
+                    "Micro",
+                    self.config.audio.microphone,
+                    Message::ToggleMicAudio(!self.config.audio.microphone),
+                ),
+            ],
+        );
 
-        // Format picker - styled like onagre's search input
+        // Output format
         let format_section = self.create_section(
             "OUTPUT FORMAT",
             container(
                 pick_list(
-                    vec![OutputFormat::WebM, OutputFormat::Mp4, OutputFormat::Mkv],
+                    OUTPUT_FORMATS,
                     Some(self.config.format),
                     Message::FormatSelected,
                 )
@@ -459,12 +704,11 @@ impl App {
 
         // Save location
         let folder_text = self.config.output_dir.to_string_lossy().to_string();
-        let folder_display = if folder_text.len() > 35 {
-            format!("...{}", &folder_text[folder_text.len() - 32..])
+        let folder_display = if folder_text.len() > 22 {
+            format!("...{}", &folder_text[folder_text.len() - 19..])
         } else {
             folder_text
         };
-
         let location_section = self.create_section(
             "SAVE LOCATION",
             container(
@@ -489,11 +733,11 @@ impl App {
             )))),
         );
 
-        // Record button - primary action
+        // Record button
         let record_button = button(
-            text("Start Recording")
-                .size(design::input_text_size(self.scale_factor))
-                .horizontal_alignment(alignment::Horizontal::Center),
+            container(text("Start Recording").size(design::input_text_size(self.scale_factor)))
+                .width(Length::Fill)
+                .center_x(),
         )
         .on_press(Message::StartRecording)
         .padding([
@@ -505,15 +749,27 @@ impl App {
             colors,
         ))));
 
-        // Layout with onagre-style spacing
+        // Left column: Capture Mode, [Display], Framerate
+        let mut left_items: Vec<Element<Message>> = vec![capture_section];
+        if let Some(section) = display_section {
+            left_items.push(section);
+        }
+        left_items.push(framerate_section);
+        let left_col = Column::with_children(left_items)
+            .spacing(section_spacing)
+            .width(Length::Fill);
+
+        // Right column: Audio Source, Output Format, Save Location
+        let right_col = column![audio_section, format_section, location_section]
+            .spacing(section_spacing)
+            .width(Length::Fill);
+
+        let col_gap = Length::Fixed(section_spacing as f32);
+
         container(
             column![
                 title_section,
-                capture_section,
-                audio_section,
-                format_section,
-                location_section,
-                Space::with_height(Length::Fill), // Push button to bottom
+                row![left_col, Space::with_width(col_gap), right_col],
                 record_button,
             ]
             .spacing(section_spacing),
@@ -553,17 +809,17 @@ impl App {
     ) -> Element<'_, Message> {
         button(
             column![
-                text(icon).size(24), // Keep icon size fixed for consistency
+                text(icon).size(24),
                 Space::with_height(Length::Fixed(design::tiny_space(self.scale_factor))),
                 text(label).size(design::button_text_size(self.scale_factor))
             ]
             .spacing(0)
             .align_items(alignment::Alignment::Center)
-            .width(Length::Fixed(design::button_width(self.scale_factor) as f32)),
+            .width(Length::Fill),
         )
         .on_press(message)
-        .padding([design::button_padding_v(self.scale_factor), 0]) // Vertical padding only
-        .width(Length::Fixed(design::button_width(self.scale_factor) as f32))
+        .padding([design::button_padding_v(self.scale_factor), 0])
+        .width(Length::Fill)
         .height(Length::Fixed(
             design::button_height(self.scale_factor) as f32
         ))
@@ -573,10 +829,65 @@ impl App {
         .into()
     }
 
+    fn view_compact_error(&self) -> Element<'_, Message> {
+        let colors = self.theme.colors;
+        let msg = self
+            .last_error
+            .as_deref()
+            .unwrap_or("wf-recorder exited unexpectedly");
+
+        let back_btn = button(
+            container(text("Back").size(design::button_text_size(self.scale_factor)))
+                .width(Length::Fill)
+                .center_x()
+                .center_y(),
+        )
+        .on_press(Message::DismissError)
+        .width(Length::Shrink)
+        .padding([4, 14])
+        .style(iced::theme::Button::Custom(Box::new(theme::PrimaryButton(
+            colors,
+        ))));
+
+        container(
+            column![
+                text(msg)
+                    .size(design::label_size(self.scale_factor))
+                    .style(iced::theme::Text::Color(colors.danger)),
+                back_btn,
+            ]
+            .spacing(8)
+            .align_items(alignment::Alignment::Center),
+        )
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x()
+        .center_y()
+        .padding(design::COMPACT_BUTTON_PADDING)
+        .style(iced::theme::Container::Custom(Box::new(
+            theme::ErrorIndicator(colors),
+        )))
+        .into()
+    }
+
     // Compact countdown view - minimal UI for recording
+    fn stop_button(&self) -> Element<'_, Message> {
+        let colors = self.theme.colors;
+        button(
+            container(Space::new(Length::Fixed(10.0), Length::Fixed(10.0))).style(
+                iced::theme::Container::Custom(Box::new(theme::StopIconStyle)),
+            ),
+        )
+        .on_press(Message::StopRecording)
+        .padding(design::COMPACT_BUTTON_PADDING)
+        .style(iced::theme::Button::Custom(Box::new(theme::CompactButton(
+            colors,
+        ))))
+        .into()
+    }
+
     fn view_compact_countdown(&self, count: u8) -> Element<'_, Message> {
         let colors = self.theme.colors;
-
         container(
             row![
                 text(count.to_string())
@@ -587,12 +898,7 @@ impl App {
                     })
                     .style(iced::theme::Text::Color(colors.primary)),
                 Space::with_width(Length::Fixed(design::small_space(self.scale_factor))),
-                button(text("✕").size(design::COMPACT_ICON_SIZE))
-                    .on_press(Message::StopRecording)
-                    .padding(design::COMPACT_BUTTON_PADDING)
-                    .style(iced::theme::Button::Custom(Box::new(theme::CompactButton(
-                        colors
-                    )))),
+                self.stop_button(),
             ]
             .align_items(alignment::Alignment::Center),
         )
@@ -607,20 +913,13 @@ impl App {
         .into()
     }
 
-    // Compact recording view - minimal recording indicator
     fn view_compact_recording(&self) -> Element<'_, Message> {
         let colors = self.theme.colors;
         let minutes = self.recording_duration.as_secs() / 60;
         let seconds = self.recording_duration.as_secs() % 60;
-        let time_text = format!("{minutes:02}:{seconds:02}");
-
         container(
             row![
-                text("●")
-                    .size(design::COMPACT_ICON_SIZE)
-                    .style(iced::theme::Text::Color(colors.danger)),
-                Space::with_width(Length::Fixed(design::small_space(self.scale_factor))),
-                text(time_text)
+                text(format!("{minutes:02}:{seconds:02}"))
                     .size(design::timer_text_size(self.scale_factor))
                     .font(Font {
                         family: iced::font::Family::Monospace,
@@ -628,13 +927,8 @@ impl App {
                         ..Default::default()
                     })
                     .style(iced::theme::Text::Color(colors.text)),
-                Space::with_width(Length::Fixed(design::small_space(self.scale_factor))),
-                button(text("⏹").size(design::COMPACT_ICON_SIZE))
-                    .on_press(Message::StopRecording)
-                    .padding(design::COMPACT_BUTTON_PADDING)
-                    .style(iced::theme::Button::Custom(Box::new(theme::CompactButton(
-                        colors
-                    )))),
+                Space::with_width(Length::Fixed(6.0 * self.scale_factor.max(1.0))),
+                self.stop_button(),
             ]
             .align_items(alignment::Alignment::Center),
         )
@@ -651,11 +945,12 @@ impl App {
 
     // Helper methods for window sizing and positioning
     fn get_settings_size(&self) -> Size {
+        let has_display = matches!(self.config.region, CaptureRegion::FullScreen)
+            && !self.available_outputs.is_empty();
         Size::new(
             (design::BASE_WINDOW_WIDTH * self.scale_factor)
                 .clamp(design::MIN_WINDOW_WIDTH, design::MAX_WINDOW_WIDTH),
-            (design::BASE_WINDOW_HEIGHT * self.scale_factor)
-                .clamp(design::MIN_WINDOW_HEIGHT, design::MAX_WINDOW_HEIGHT),
+            settings_window_height(self.scale_factor, has_display),
         )
     }
 
@@ -668,15 +963,25 @@ impl App {
         )
     }
 
-    fn get_compact_position(&self) -> Point {
-        let compact_size = self.get_compact_size();
+    fn get_error_size(&self) -> Size {
+        let s = self.scale_factor.max(1.0);
+        Size::new(
+            design::ERROR_WINDOW_WIDTH * s,
+            design::ERROR_WINDOW_HEIGHT * s,
+        )
+    }
+
+    /// Returns a top-right position for a window of the given size.
+    fn get_compact_position_for(&self, size: Size) -> Point {
         let padding = design::COMPACT_WINDOW_PADDING * self.scale_factor;
+        Point::new(
+            (self.screen_size.width - size.width - padding).max(0.0),
+            padding,
+        )
+    }
 
-        // Ensure the window stays within screen bounds
-        let x = (self.screen_size.width - compact_size.width - padding).max(0.0);
-        let y = padding;
-
-        Point::new(x, y)
+    fn get_compact_position(&self) -> Point {
+        self.get_compact_position_for(self.get_compact_size())
     }
 
     fn get_center_position(&self, window_size: Size) -> Point {
@@ -694,16 +999,6 @@ impl std::fmt::Display for OutputFormat {
             OutputFormat::WebM => write!(f, "WebM"),
             OutputFormat::Mp4 => write!(f, "MP4"),
             OutputFormat::Mkv => write!(f, "MKV"),
-        }
-    }
-}
-
-impl std::fmt::Display for AudioSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AudioSource::None => write!(f, "No Audio"),
-            AudioSource::System => write!(f, "System Audio"),
-            AudioSource::Microphone => write!(f, "Microphone"),
         }
     }
 }
