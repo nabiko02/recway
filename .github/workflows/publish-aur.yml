@@ -1,7 +1,9 @@
 name: Publish AUR package
 
 on:
-  workflow_dispatch: # disabled — run manually only when AUR_SSH_PRIVATE_KEY is configured
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -14,18 +16,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: |
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm git openssh rust libxkbcommon wayland
+        run: pacman -Syu --noconfirm git openssh rust libxkbcommon wayland curl
 
       - name: Get version
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - name: Update PKGBUILD
+      - name: Update PKGBUILD version and sha256sum
         run: |
-          # Update version in PKGBUILD
-          sed -i "s/pkgver=.*/pkgver=${GITHUB_REF#refs/tags/v}/" PKGBUILD
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          sed -i "s/pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          URL="https://github.com/nabiko02/recway/archive/v${VERSION}.tar.gz"
+          SUM=$(curl -sL "$URL" | sha256sum | cut -d' ' -f1)
+          sed -i "s/sha256sums=.*/sha256sums=('${SUM}')/" PKGBUILD
 
       - name: Generate .SRCINFO
         run: |
@@ -38,9 +41,9 @@ jobs:
         with:
           pkgname: recway
           pkgbuild: ./PKGBUILD
-          commit_username: "GitHub Action"
-          commit_email: "actions@github.com"
+          commit_username: "Nabiko02"
+          commit_email: "Lusty3418Charger1631Retold5412@proton.me"
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: "Update to version ${{ steps.get_version.outputs.version }}"
+          commit_message: "Update to ${{ steps.get_version.outputs.version }}"
           ssh_keyscan_types: ed25519
           force_push: true
