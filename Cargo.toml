@@ -1,8 +1,8 @@
 [package]
-name = "wf-recorder-gui"
+name = "recway"
 version = "1.0.0"
 edition = "2024"
-description = "A modern, minimal GUI for wf-recorder"
+description = "A frontend for wf-recorder"
 authors = ["Nabiko02"]
 
 [profile.release]

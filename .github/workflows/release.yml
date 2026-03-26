@@ -48,8 +48,8 @@ jobs:
       - name: Package binary
         run: |
           mkdir -p dist
-          tar -czf dist/wf-recorder-gui-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz \
-            -C target/release wf-recorder-gui
+          tar -czf dist/recway-${{ steps.version.outputs.version }}-x86_64-linux.tar.gz \
+            -C target/release recway
 
       - name: Build Arch package
         run: |
@@ -64,5 +64,5 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           files: |
-            dist/wf-recorder-gui-*.tar.gz
-            wf-recorder-gui-*.pkg.tar.zst
+            dist/recway-*.tar.gz
+            recway-*.pkg.tar.zst

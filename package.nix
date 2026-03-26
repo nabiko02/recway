@@ -20,7 +20,7 @@
 }:
 
 rustPlatform.buildRustPackage rec {
-  pname = "wf-recorder-gui";
+  pname = "recway";
   version = "0.4.0";
 
   src = ./.;
@@ -52,11 +52,11 @@ rustPlatform.buildRustPackage rec {
 
   desktopEntry = [
     (makeDesktopItem {
-      name = "WF-Recorder-GUI";
-      comment = "Modern GUI for wf-recorder screen recorder";
-      exec = "wf-recorder-gui";
+      name = "RecWay";
+      comment = "A frontend for wf-recorder screen recorder";
+      exec = "recway";
       icon = "camera-video-symbolic";
-      desktopName = "WF Recorder GUI";
+      desktopName = "RecWay";
       terminal = false;
       type = "Application";
       categories = [ "AudioVideo" "Video" "Recorder" "GTK" ];
@@ -73,8 +73,8 @@ rustPlatform.buildRustPackage rec {
   '';
 
   meta = with lib; {
-    description = "Modern GUI for wf-recorder, the Wayland screen recorder";
-    homepage = "https://github.com/nabiko02/wf-recorder-gui";
+    description = "A frontend for wf-recorder, the Wayland screen recorder";
+    homepage = "https://github.com/nabiko02/recway";
     license = licenses.mit;
     maintainers = [ ];
   };

@@ -1,10 +1,10 @@
 # Maintainer: Nabiko02
-pkgname=wf-recorder-gui
+pkgname=recway
 pkgver=1.0.0
 pkgrel=1
-pkgdesc="Modern GUI for wf-recorder screen recorder"
+pkgdesc="Frontend for wf-recorder screen recorder"
 arch=('x86_64')
-url="https://github.com/nabiko02/wf-recorder-gui"
+url="https://github.com/nabiko02/recway"
 license=('MIT')
 depends=('wf-recorder' 'wlr-randr')
 makedepends=('rust' 'cargo')

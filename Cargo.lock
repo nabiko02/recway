@@ -2180,6 +2180,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "recway"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "iced",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tokio",
+ "which",
+]
+
+[[package]]
 name = "redox_syscall"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3197,21 +3212,6 @@ checksum = "aa30049b1c872b72c89866d458eae9f20380ab280ffd1b1e18df2d3e2d98cfe0"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "wf-recorder-gui"
-version = "1.0.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dirs",
- "iced",
- "rfd",
- "serde",
- "serde_json",
- "tokio",
- "which",
 ]
 
 [[package]]

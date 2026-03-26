@@ -1,12 +1,12 @@
-# WF Recorder GUI
+# RecWay
 
-[![CI](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/ci.yml/badge.svg)](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/ci.yml)
-[![Release](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/release.yml/badge.svg)](https://github.com/nabiko02/wf-recorder-gui/actions/workflows/release.yml)
-[![AUR version](https://img.shields.io/aur/version/wf-recorder-gui)](https://aur.archlinux.org/packages/wf-recorder-gui/)
+[![CI](https://github.com/nabiko02/recway/actions/workflows/ci.yml/badge.svg)](https://github.com/nabiko02/recway/actions/workflows/ci.yml)
+[![Release](https://github.com/nabiko02/recway/actions/workflows/release.yml/badge.svg)](https://github.com/nabiko02/recway/actions/workflows/release.yml)
+[![AUR version](https://img.shields.io/aur/version/recway)](https://aur.archlinux.org/packages/recway/)
 
 Fork of [ali205412/wf-recorder-gui](https://github.com/ali205412/wf-recorder-gui).
 
-A modern, minimal GUI for [wf-recorder](https://github.com/ammen99/wf-recorder), the Wayland screen recorder. Built with Rust and [iced](https://github.com/iced-rs/iced), featuring a glass-morphism dark theme, responsive layout, and a non-intrusive compact overlay during recording.
+A frontend for [wf-recorder](https://github.com/ammen99/wf-recorder), the Wayland screen recorder. Built with Rust and [iced](https://github.com/iced-rs/iced), featuring a glass-morphism dark theme, responsive layout, and a non-intrusive compact overlay during recording.
 
 ## Features
 
@@ -29,6 +29,13 @@ Runtime dependencies:
 | `slurp` | Interactive region selection (Region mode only) |
 | `pactl` | Audio source detection |
 
+### Installing dependencies
+
+**Arch Linux**
+```bash
+sudo pacman -S wf-recorder wlr-randr slurp libpulse
+```
+
 ## Installation
 
 ### Arch Linux (AUR)
@@ -36,18 +43,18 @@ Runtime dependencies:
 > **Note:** The AUR package is not yet available.
 
 ```bash
-yay -S wf-recorder-gui
+yay -S recway
 # or
-paru -S wf-recorder-gui
+paru -S recway
 ```
 
 ### Pre-built binary (all distros)
 
-Download the latest `wf-recorder-gui-x.x.x-x86_64-linux.tar.gz` from the [Releases](https://github.com/nabiko02/wf-recorder-gui/releases) page, extract and place the binary in your `PATH`:
+Download the latest `recway-x.x.x-x86_64-linux.tar.gz` from the [Releases](https://github.com/nabiko02/recway/releases) page, extract and place the binary in your `PATH`:
 
 ```bash
-tar -xzf wf-recorder-gui-*.tar.gz
-sudo install -Dm755 wf-recorder-gui /usr/local/bin/wf-recorder-gui
+tar -xzf recway-*.tar.gz
+sudo install -Dm755 recway /usr/local/bin/recway
 ```
 
 ### Build from source
@@ -56,11 +63,11 @@ sudo install -Dm755 wf-recorder-gui /usr/local/bin/wf-recorder-gui
 # Install build dependencies (Arch)
 sudo pacman -S rust libxkbcommon wayland
 
-git clone https://github.com/nabiko02/wf-recorder-gui.git
-cd wf-recorder-gui
+git clone https://github.com/nabiko02/recway.git
+cd recway
 cargo build --release
-sudo install -Dm755 target/release/wf-recorder-gui /usr/bin/wf-recorder-gui
-sudo install -Dm644 wf-recorder-gui.desktop /usr/share/applications/wf-recorder-gui.desktop
+sudo install -Dm755 target/release/recway /usr/bin/recway
+sudo install -Dm644 recway.desktop /usr/share/applications/recway.desktop
 ```
 
 ## Usage
@@ -82,7 +89,7 @@ sudo install -Dm644 wf-recorder-gui.desktop /usr/share/applications/wf-recorder-
 ```
 src/
 ├── audio/           # Audio source detection
-├── config/          # Persistent JSON config (~/.config/wf-recorder-gui/config.json)
+├── config/          # Persistent JSON config (~/.config/recway/config.json)
 ├── recorder/        # wf-recorder subprocess, argument building, geometry validation
 ├── theme.rs         # Glass-morphism design system, responsive scaling
 └── main.rs          # App state machine, iced update/view

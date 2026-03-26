@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=WF Recorder GUI
-Comment=Modern GUI for wf-recorder screen recorder
-Exec=wf-recorder-gui
+Name=RecWay
+Comment=A frontend for wf-recorder screen recorder
+Exec=recway
 Icon=camera-video-symbolic
 Terminal=false
 Type=Application
